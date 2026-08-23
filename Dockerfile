@@ -16,8 +16,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
 # main.go and set TZ in the deployment. A scratch image has no zone database
 # and Go falls back to UTC without complaining.
 FROM scratch
+# The deployment mounts a PersistentVolumeClaim here.
+WORKDIR /var/lib/notes
 COPY --from=build /out/notes /notes
 USER 65532:65532
 ENTRYPOINT ["/notes"]
 
-CMD ["-addr", ":8093"]
+CMD ["-addr", ":8093", "-store", "/var/lib/notes/notes.json"]
