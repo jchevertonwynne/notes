@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -198,12 +199,20 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
+// The favicon, embedded rather than served from a directory: this app has no
+// other static assets, and a single file does not justify an embed.FS and a
+// file server.
+//
+//go:embed icon.svg
+var iconSVG []byte
+
 const pageTemplate = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Notes</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
 <style>
   body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
   h1 { font-size: 1.4rem; }
@@ -264,6 +273,15 @@ func newMux(store *Store) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("GET /icon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		// Immutable in practice: it changes only when the binary does, and a
+		// new binary means a new URL is not needed because browsers revalidate
+		// on a new session anyway. A day is a reasonable middle.
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(iconSVG)
 	})
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
