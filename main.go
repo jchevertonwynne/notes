@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"os/signal"
+
+	"notes/internal/metrics"
 )
 
 // maxNoteLength and maxNotes bound a completely unauthenticated public write
@@ -315,6 +317,8 @@ func newMux(store *Store) http.Handler {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
+	mux.Handle("GET /metrics", metrics.Handler())
+
 	return mux
 }
 
@@ -350,7 +354,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    *addr,
-		Handler: newMux(store),
+		Handler: metrics.Instrument(newMux(store)),
 		// These are set explicitly because this server is exposed to the
 		// internet: without them a slow or hostile client can hold a
 		// connection open indefinitely and exhaust server resources.
