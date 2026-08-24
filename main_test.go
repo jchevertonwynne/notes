@@ -23,7 +23,7 @@ func newTestStore(t *testing.T) *Store {
 func TestAddNote(t *testing.T) {
 	s := newTestStore(t)
 
-	n, err := s.Add("buy milk")
+	n, err := s.Add(t.Context(), "buy milk")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -46,12 +46,12 @@ func TestAddNote(t *testing.T) {
 func TestDeleteNote(t *testing.T) {
 	s := newTestStore(t)
 
-	n, err := s.Add("to be removed")
+	n, err := s.Add(t.Context(), "to be removed")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	ok, err := s.Delete(n.ID)
+	ok, err := s.Delete(t.Context(), n.ID)
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestDeleteNote(t *testing.T) {
 	}
 
 	// Deleting an already-gone ID should report not-found, not error.
-	ok, err = s.Delete(n.ID)
+	ok, err = s.Delete(t.Context(), n.ID)
 	if err != nil {
 		t.Fatalf("Delete of missing note returned error: %v", err)
 	}
@@ -80,10 +80,10 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	if _, err := s1.Add("first"); err != nil {
+	if _, err := s1.Add(t.Context(), "first"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if _, err := s1.Add("second"); err != nil {
+	if _, err := s1.Add(t.Context(), "second"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestRejectEmptyNote(t *testing.T) {
 	s := newTestStore(t)
 
 	for _, text := range []string{"", "   ", "\n\t "} {
-		if _, err := s.Add(text); err == nil {
+		if _, err := s.Add(t.Context(), text); err == nil {
 			t.Fatalf("Add(%q) succeeded, want error", text)
 		}
 	}
@@ -124,12 +124,12 @@ func TestRejectOverLongNote(t *testing.T) {
 	s := newTestStore(t)
 
 	tooLong := strings.Repeat("a", maxNoteLength+1)
-	if _, err := s.Add(tooLong); err == nil {
+	if _, err := s.Add(t.Context(), tooLong); err == nil {
 		t.Fatal("Add(over-long note) succeeded, want error")
 	}
 
 	ok := strings.Repeat("a", maxNoteLength)
-	if _, err := s.Add(ok); err != nil {
+	if _, err := s.Add(t.Context(), ok); err != nil {
 		t.Fatalf("Add(note at exactly max length) failed: %v", err)
 	}
 }
@@ -138,11 +138,11 @@ func TestRejectBeyondNoteCap(t *testing.T) {
 	s := newTestStore(t)
 
 	for i := 0; i < maxNotes; i++ {
-		if _, err := s.Add("note"); err != nil {
+		if _, err := s.Add(t.Context(), "note"); err != nil {
 			t.Fatalf("Add #%d: %v", i, err)
 		}
 	}
-	if _, err := s.Add("one too many"); err == nil {
+	if _, err := s.Add(t.Context(), "one too many"); err == nil {
 		t.Fatal("Add beyond maxNotes succeeded, want error")
 	}
 	if notes := s.List(); len(notes) != maxNotes {

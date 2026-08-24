@@ -95,7 +95,7 @@ func (s *Store) List() []Note {
 // the length check is cheap and lock-free, but the count check must be
 // atomic with the append or two concurrent requests could both slip in
 // under the cap and blow past it.
-func (s *Store) Add(text string) (Note, error) {
+func (s *Store) Add(ctx context.Context, text string) (Note, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Note{}, errors.New("note text must not be empty")
@@ -113,7 +113,7 @@ func (s *Store) Add(text string) (Note, error) {
 
 	n := Note{ID: newID(), Text: text, Created: time.Now().UTC()}
 	s.notes = append(s.notes, n)
-	if err := s.saveLocked(); err != nil {
+	if err := s.saveLocked(ctx); err != nil {
 		// Roll back the in-memory append so a failed save doesn't leave
 		// memory and disk disagreeing about what was persisted.
 		s.notes = s.notes[:len(s.notes)-1]
@@ -125,7 +125,7 @@ func (s *Store) Add(text string) (Note, error) {
 // Delete removes a note by ID and persists the result. It reports whether a
 // note was actually found, so the handler can return 404 rather than
 // silently succeeding on an unknown ID.
-func (s *Store) Delete(id string) (bool, error) {
+func (s *Store) Delete(ctx context.Context, id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -142,7 +142,7 @@ func (s *Store) Delete(id string) (bool, error) {
 
 	removed := s.notes[idx]
 	s.notes = append(s.notes[:idx], s.notes[idx+1:]...)
-	if err := s.saveLocked(); err != nil {
+	if err := s.saveLocked(ctx); err != nil {
 		// Put it back in place; a failed save must not lose data from memory.
 		s.notes = append(s.notes, Note{})
 		copy(s.notes[idx+1:], s.notes[idx:])
@@ -159,34 +159,36 @@ func (s *Store) Delete(id string) (bool, error) {
 // a directory is atomic on POSIX filesystems, so any reader (or a process
 // that crashes mid-write) sees either the old complete file or the new
 // complete file, never a truncated one.
-func (s *Store) saveLocked() error {
-	data, err := json.MarshalIndent(s.notes, "", "  ")
-	if err != nil {
-		return err
-	}
+func (s *Store) saveLocked(ctx context.Context) error {
+	return withSpan(ctx, "save", func(ctx context.Context) error {
+		data, err := json.MarshalIndent(s.notes, "", "  ")
+		if err != nil {
+			return err
+		}
 
-	dir := filepath.Dir(s.path)
-	tmp, err := os.CreateTemp(dir, ".notes-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	// If anything below fails before the rename, remove the leftover temp
-	// file; once the rename succeeds this is a no-op (the path is gone).
-	defer os.Remove(tmpPath)
+		dir := filepath.Dir(s.path)
+		tmp, err := os.CreateTemp(dir, ".notes-*.tmp")
+		if err != nil {
+			return err
+		}
+		tmpPath := tmp.Name()
+		// If anything below fails before the rename, remove the leftover temp
+		// file; once the rename succeeds this is a no-op (the path is gone).
+		defer os.Remove(tmpPath)
 
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, s.path)
+		if _, err := tmp.Write(data); err != nil {
+			tmp.Close()
+			return err
+		}
+		if err := tmp.Sync(); err != nil {
+			tmp.Close()
+			return err
+		}
+		if err := tmp.Close(); err != nil {
+			return err
+		}
+		return os.Rename(tmpPath, s.path)
+	})
 }
 
 // newID generates a short random identifier for a note. Random rather than
@@ -296,7 +298,7 @@ func newMux(store *Store) http.Handler {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		if _, err := store.Add(r.FormValue("text")); err != nil {
+		if _, err := store.Add(r.Context(), r.FormValue("text")); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			renderIndex(w, tmpl, store, err.Error())
 			return
@@ -306,7 +308,7 @@ func newMux(store *Store) http.Handler {
 
 	mux.HandleFunc("POST /notes/{id}/delete", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		ok, err := store.Delete(id)
+		ok, err := store.Delete(r.Context(), id)
 		if err != nil {
 			http.Error(w, "could not delete note", http.StatusInternalServerError)
 			return
