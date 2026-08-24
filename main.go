@@ -27,6 +27,7 @@ import (
 	"os/signal"
 
 	"notes/internal/metrics"
+	"notes/internal/tracing"
 )
 
 // maxNoteLength and maxNotes bound a completely unauthenticated public write
@@ -345,7 +346,13 @@ func renderIndex(w http.ResponseWriter, tmpl *template.Template, store *Store, e
 func main() {
 	addr := flag.String("addr", ":8093", "address to listen on")
 	storePath := flag.String("store", "notes.json", "path to the notes JSON file")
+	otelEndpoint := flag.String("otel-endpoint", "", "host:port of an OTLP/gRPC trace collector; tracing is disabled if empty")
 	flag.Parse()
+
+	shutdownTracing, err := tracing.Init(context.Background(), "notes", *otelEndpoint)
+	if err != nil {
+		log.Fatalf("init tracing: %v", err)
+	}
 
 	store, err := NewStore(*storePath)
 	if err != nil {
@@ -354,7 +361,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    *addr,
-		Handler: metrics.Instrument(newMux(store)),
+		Handler: tracing.Middleware("notes", metrics.Instrument(newMux(store))),
 		// These are set explicitly because this server is exposed to the
 		// internet: without them a slow or hostile client can hold a
 		// connection open indefinitely and exhaust server resources.
@@ -385,5 +392,8 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+	if err := shutdownTracing(shutdownCtx); err != nil {
+		log.Printf("tracing shutdown: %v", err)
 	}
 }
