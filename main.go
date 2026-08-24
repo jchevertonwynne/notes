@@ -27,6 +27,7 @@ import (
 	"os/signal"
 
 	"notes/internal/metrics"
+	"notes/internal/profiling"
 	"notes/internal/tracing"
 )
 
@@ -349,7 +350,10 @@ func main() {
 	addr := flag.String("addr", ":8093", "address to listen on")
 	storePath := flag.String("store", "notes.json", "path to the notes JSON file")
 	otelEndpoint := flag.String("otel-endpoint", "", "host:port of an OTLP/gRPC trace collector; tracing is disabled if empty")
+	pprofAddr := flag.String("pprof-addr", ":6060", "listen address for pprof debug endpoints; never expose this outside the cluster")
 	flag.Parse()
+
+	go profiling.ListenAndServe(*pprofAddr)
 
 	shutdownTracing, err := tracing.Init(context.Background(), "notes", *otelEndpoint)
 	if err != nil {
